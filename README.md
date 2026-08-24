@@ -22,9 +22,7 @@ This repository contains the official implementation of **RFM-TransE** (Relation
 ├── RFM_TransE.py                # Core RFM-TransE model implementation
 ├── transe.py                    # Standard TransE baseline model
 ├── utils.py                     # Dataset loading, caching, labeling & evaluation metrics
-├── benchmark.py                 # Multi-seed experimental benchmark runner
-├── benchmark_results.md         # Detailed empirical benchmark results
-└── benchmark_results_rerun.md   # Extended multi-seed distribution and ablation audit
+└── benchmark.py                 # Multi-seed experimental benchmark runner
 ```
 
 ---
