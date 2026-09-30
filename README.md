@@ -174,32 +174,27 @@ change across the low, medium, and high target regimes.
 | WN18RR | Medium | 0.1295 ± 0.0003 | 0.2273 ± 0.0020 | 0.2898 ± 0.0014 | 0.7904 ± 0.0051 | 0.1533 ± 0.0014 | 0.2462 ± 0.0018 | 0.2132 ± 0.0021 | 38.2s ± 2.1s |
 | WN18RR | High | 0.1308 ± 0.0013 | 0.2321 ± 0.0015 | 0.2919 ± 0.0016 | 0.7892 ± 0.0020 | 0.0892 ± 0.0004 | 0.1990 ± 0.0005 | 0.1642 ± 0.0005 | 39.8s ± 4.7s |
 
-### Medium-regime comparison with Standard TransE and the earlier sampled model
+### Medium-regime sigmoid comparison before and after the coverage change
 
-The **New Standard** and **New Sigmoid** rows use the complete official splits.
-The **Earlier Sigmoid** rows reproduce the aggregate values reported in the
-thesis before the coverage change, when training was capped at 10,000 triples
-and validation/test evaluation at 500 triples. Because the datasets and protocol
-coverage differ, the last row in each group is a historical reference rather
-than a controlled model ablation.
+The **Full-split Sigmoid** rows use the complete official splits. The **Earlier
+Sampled Sigmoid** rows reproduce the aggregate values reported in the thesis
+before the coverage change, when training was capped at 10,000 triples and
+validation/test evaluation at 500 triples. Because the dataset coverage differs,
+this is a comparison of benchmark protocols rather than a controlled model
+ablation.
 
 | Dataset | Version | MRR | Hits@3 | Hits@5 | F1 | MSE | MAE | ECE | Train time |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| CoDEx-S | New Standard | 0.2113 ± 0.0043 | 0.2302 ± 0.0054 | 0.2966 ± 0.0023 | 0.8804 ± 0.0048 | 0.2063 ± 0.0039 | 0.3801 ± 0.0008 | 0.2491 ± 0.0070 | 16.0s ± 2.0s |
-| CoDEx-S | New Sigmoid | 0.2223 ± 0.0031 | 0.2468 ± 0.0084 | 0.3170 ± 0.0048 | 0.8982 ± 0.0012 | 0.0824 ± 0.0037 | 0.2544 ± 0.0109 | 0.1605 ± 0.0102 | 17.5s ± 0.5s |
-| CoDEx-S | Earlier Sigmoid | 0.1519 ± 0.0015 | 0.1643 ± 0.0029 | 0.2193 ± 0.0045 | 0.7997 ± 0.0125 | 0.1421 ± 0.0004 | 0.3738 ± 0.0005 | 0.1246 ± 0.0137 | 1.7s ± 0.1s |
-| CoDEx-M | New Standard | 0.1250 ± 0.0015 | 0.1362 ± 0.0017 | 0.1819 ± 0.0004 | 0.8670 ± 0.0016 | 0.1867 ± 0.0040 | 0.3763 ± 0.0006 | 0.2039 ± 0.0113 | 206.7s ± 0.7s |
-| CoDEx-M | New Sigmoid | 0.1325 ± 0.0042 | 0.1443 ± 0.0051 | 0.1892 ± 0.0045 | 0.8904 ± 0.0039 | 0.0671 ± 0.0014 | 0.1736 ± 0.0022 | 0.0814 ± 0.0016 | 232.7s ± 1.5s |
-| CoDEx-M | Earlier Sigmoid | 0.0529 ± 0.0110 | 0.0520 ± 0.0108 | 0.0757 ± 0.0155 | 0.7132 ± 0.0057 | 0.1525 ± 0.0009 | 0.3826 ± 0.0012 | 0.1216 ± 0.0068 | 1.5s ± 0.0s |
-| FB15k | New Standard | 0.1453 ± 0.0031 | 0.1545 ± 0.0061 | 0.1958 ± 0.0047 | 0.9162 ± 0.0010 | 0.2301 ± 0.0010 | 0.3855 ± 0.0002 | 0.2823 ± 0.0014 | 347.8s ± 71.7s |
-| FB15k | New Sigmoid | 0.1707 ± 0.0041 | 0.1843 ± 0.0058 | 0.2326 ± 0.0059 | 0.9394 ± 0.0002 | 0.0374 ± 0.0004 | 0.1211 ± 0.0004 | 0.0677 ± 0.0008 | 369.0s ± 76.5s |
-| FB15k | Earlier Sigmoid | 0.0461 ± 0.0037 | 0.0473 ± 0.0021 | 0.0637 ± 0.0015 | 0.5645 ± 0.0119 | 0.1603 ± 0.0006 | 0.3918 ± 0.0006 | 0.0887 ± 0.0056 | 1.5s ± 0.0s |
-| FB15k-237 | New Standard | 0.1529 ± 0.0009 | 0.1618 ± 0.0024 | 0.2054 ± 0.0011 | 0.9117 ± 0.0020 | 0.2164 ± 0.0005 | 0.3803 ± 0.0001 | 0.2663 ± 0.0013 | 200.0s ± 1.3s |
-| FB15k-237 | New Sigmoid | 0.1585 ± 0.0011 | 0.1668 ± 0.0024 | 0.2097 ± 0.0024 | 0.9285 ± 0.0006 | 0.0461 ± 0.0008 | 0.1352 ± 0.0012 | 0.0711 ± 0.0012 | 232.2s ± 2.7s |
-| FB15k-237 | Earlier Sigmoid | 0.0945 ± 0.0009 | 0.1030 ± 0.0050 | 0.1287 ± 0.0040 | 0.6272 ± 0.0397 | 0.1555 ± 0.0012 | 0.3871 ± 0.0016 | 0.1015 ± 0.0074 | 1.5s ± 0.0s |
-| WN18RR | New Standard | 0.0725 ± 0.0128 | 0.1071 ± 0.0234 | 0.1474 ± 0.0294 | 0.7663 ± 0.0087 | 0.1999 ± 0.0088 | 0.3907 ± 0.0015 | 0.2115 ± 0.0174 | 28.8s ± 3.3s |
-| WN18RR | New Sigmoid | 0.1295 ± 0.0003 | 0.2273 ± 0.0020 | 0.2898 ± 0.0014 | 0.7904 ± 0.0051 | 0.1533 ± 0.0014 | 0.2462 ± 0.0018 | 0.2132 ± 0.0021 | 38.2s ± 2.1s |
-| WN18RR | Earlier Sigmoid | 0.0064 ± 0.0009 | 0.0047 ± 0.0012 | 0.0087 ± 0.0035 | 0.6573 ± 0.0111 | 0.1641 ± 0.0006 | 0.3953 ± 0.0005 | 0.0793 ± 0.0047 | 2.9s ± 0.6s |
+| CoDEx-S | Full-split Sigmoid | 0.2223 ± 0.0031 | 0.2468 ± 0.0084 | 0.3170 ± 0.0048 | 0.8982 ± 0.0012 | 0.0824 ± 0.0037 | 0.2544 ± 0.0109 | 0.1605 ± 0.0102 | 17.5s ± 0.5s |
+| CoDEx-S | Earlier Sampled Sigmoid | 0.1519 ± 0.0015 | 0.1643 ± 0.0029 | 0.2193 ± 0.0045 | 0.7997 ± 0.0125 | 0.1421 ± 0.0004 | 0.3738 ± 0.0005 | 0.1246 ± 0.0137 | 1.7s ± 0.1s |
+| CoDEx-M | Full-split Sigmoid | 0.1325 ± 0.0042 | 0.1443 ± 0.0051 | 0.1892 ± 0.0045 | 0.8904 ± 0.0039 | 0.0671 ± 0.0014 | 0.1736 ± 0.0022 | 0.0814 ± 0.0016 | 232.7s ± 1.5s |
+| CoDEx-M | Earlier Sampled Sigmoid | 0.0529 ± 0.0110 | 0.0520 ± 0.0108 | 0.0757 ± 0.0155 | 0.7132 ± 0.0057 | 0.1525 ± 0.0009 | 0.3826 ± 0.0012 | 0.1216 ± 0.0068 | 1.5s ± 0.0s |
+| FB15k | Full-split Sigmoid | 0.1707 ± 0.0041 | 0.1843 ± 0.0058 | 0.2326 ± 0.0059 | 0.9394 ± 0.0002 | 0.0374 ± 0.0004 | 0.1211 ± 0.0004 | 0.0677 ± 0.0008 | 369.0s ± 76.5s |
+| FB15k | Earlier Sampled Sigmoid | 0.0461 ± 0.0037 | 0.0473 ± 0.0021 | 0.0637 ± 0.0015 | 0.5645 ± 0.0119 | 0.1603 ± 0.0006 | 0.3918 ± 0.0006 | 0.0887 ± 0.0056 | 1.5s ± 0.0s |
+| FB15k-237 | Full-split Sigmoid | 0.1585 ± 0.0011 | 0.1668 ± 0.0024 | 0.2097 ± 0.0024 | 0.9285 ± 0.0006 | 0.0461 ± 0.0008 | 0.1352 ± 0.0012 | 0.0711 ± 0.0012 | 232.2s ± 2.7s |
+| FB15k-237 | Earlier Sampled Sigmoid | 0.0945 ± 0.0009 | 0.1030 ± 0.0050 | 0.1287 ± 0.0040 | 0.6272 ± 0.0397 | 0.1555 ± 0.0012 | 0.3871 ± 0.0016 | 0.1015 ± 0.0074 | 1.5s ± 0.0s |
+| WN18RR | Full-split Sigmoid | 0.1295 ± 0.0003 | 0.2273 ± 0.0020 | 0.2898 ± 0.0014 | 0.7904 ± 0.0051 | 0.1533 ± 0.0014 | 0.2462 ± 0.0018 | 0.2132 ± 0.0021 | 38.2s ± 2.1s |
+| WN18RR | Earlier Sampled Sigmoid | 0.0064 ± 0.0009 | 0.0047 ± 0.0012 | 0.0087 ± 0.0035 | 0.6573 ± 0.0111 | 0.1641 ± 0.0006 | 0.3953 ± 0.0005 | 0.0793 ± 0.0047 | 2.9s ± 0.6s |
 
 The full-split results show substantially higher ranking and classification
 scores than the earlier sampled experiment, especially on the larger datasets.
