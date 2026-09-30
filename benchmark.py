@@ -1,4 +1,5 @@
 import argparse
+import math
 import random
 import time
 import torch
@@ -25,24 +26,67 @@ def set_seed(seed=42):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-def evaluate_fuzzy_scores(model, test_triples, test_neg, device):
+def evaluate_fuzzy_scores(model, test_triples, test_neg, device, batch_size=4096):
     """
     Computes fuzzy scores using the trained model.
     """
     model.eval()
-    pos_h = torch.tensor([t[0] for t in test_triples], dtype=torch.long, device=device)
-    pos_r = torch.tensor([t[1] for t in test_triples], dtype=torch.long, device=device)
-    pos_t = torch.tensor([t[2] for t in test_triples], dtype=torch.long, device=device)
-    
-    neg_h = torch.tensor([t[0] for t in test_neg], dtype=torch.long, device=device)
-    neg_r = torch.tensor([t[1] for t in test_neg], dtype=torch.long, device=device)
-    neg_t = torch.tensor([t[2] for t in test_neg], dtype=torch.long, device=device)
-    
-    with torch.no_grad():
-        pos_preds = model.fuzzy_score(pos_h, pos_r, pos_t).cpu().numpy()
-        neg_preds = model.fuzzy_score(neg_h, neg_r, neg_t).cpu().numpy()
-            
-    return pos_preds, neg_preds
+
+    def predict(triples):
+        predictions = []
+        with torch.no_grad():
+            for start in range(0, len(triples), batch_size):
+                batch = torch.tensor(
+                    triples[start:start + batch_size], dtype=torch.long, device=device
+                )
+                predictions.append(model.fuzzy_score(*batch.unbind(dim=1)).cpu().numpy())
+        return np.concatenate(predictions) if predictions else np.empty(0)
+
+    return predict(test_triples), predict(test_neg)
+
+
+def split_fraction(value):
+    value = float(value)
+    if not 0 < value <= 1:
+        raise argparse.ArgumentTypeError("Split fractions must be greater than 0 and at most 1.")
+    return value
+
+
+def positive_integer(value):
+    value = int(value)
+    if value < 1:
+        raise argparse.ArgumentTypeError("Batch size must be positive.")
+    return value
+
+
+def select_split(triples, fraction=1.0, cap=0, seed=42):
+    """Select within an official split, without mutating it or global RNG state.
+
+    Fractions apply before optional positive caps. Nonpositive caps mean no cap.
+    Returning a copy, even for full coverage, protects the cached dataset order.
+    """
+    if not 0 < fraction <= 1:
+        raise ValueError("Split fractions must be greater than 0 and at most 1.")
+    if not triples:
+        raise ValueError("Cannot benchmark an empty official split.")
+    count = max(1, math.ceil(len(triples) * fraction))
+    if cap > 0:
+        count = min(count, cap)
+    if count == len(triples):
+        return list(triples)
+    indices = sorted(random.Random(seed).sample(range(len(triples)), count))
+    return [triples[index] for index in indices]
+
+
+def prepare_splits(kg, args, seed):
+    """Keep official train/validation/test boundaries; optional sampling is local."""
+    val_cap = args.eval_sample_size if args.val_sample_size is None else args.val_sample_size
+    test_cap = args.eval_sample_size if args.test_sample_size is None else args.test_sample_size
+    return (
+        select_split(kg.train_triples, args.train_fraction, args.train_sample_size, seed),
+        select_split(kg.val_triples, args.val_fraction, val_cap, seed + 1),
+        select_split(kg.test_triples, args.test_fraction, test_cap, seed + 2),
+    )
 
 
 def compute_training_coverage(full_train_triples, sampled_train_triples):
@@ -112,11 +156,14 @@ def aggregate_seed_statistic(values):
 def run_single_seed_experiment(dataset_name, uncertainty_level, seed, args, device, kg, all_triples_set, num_entities, num_relations):
     set_seed(seed)
     
-    # 1. Subsample training set if needed for speed
-    if args.train_sample_size > 0 and len(kg.train_triples) > args.train_sample_size:
-        train_triples = random.sample(kg.train_triples, args.train_sample_size)
-    else:
-        train_triples = kg.train_triples
+    # Use complete official splits unless the user explicitly requests subsets.
+    train_triples, val_eval_subset, test_eval_subset = prepare_splits(kg, args, seed)
+    for name, full, selected in (
+        ("Train", kg.train_triples, train_triples),
+        ("Validation", kg.val_triples, val_eval_subset),
+        ("Test", kg.test_triples, test_eval_subset),
+    ):
+        print(f"{name}: {len(selected):,}/{len(full):,} triples ({100 * len(selected) / len(full):.2f}%)")
         
     # Adjacency list for Jaccard-based fuzzy label generation
     entity_neighbors = {i: set() for i in range(num_entities)}
@@ -124,10 +171,6 @@ def run_single_seed_experiment(dataset_name, uncertainty_level, seed, args, devi
         entity_neighbors[h].add(t)
         entity_neighbors[t].add(h)
         
-    # 2. Subsample evaluation sets
-    val_eval_subset = random.sample(kg.val_triples, min(args.eval_sample_size, len(kg.val_triples)))
-    test_eval_subset = random.sample(kg.test_triples, min(args.eval_sample_size, len(kg.test_triples)))
-    
     # Generate validation and test negatives
     val_neg = kg.get_corrupted_triples(val_eval_subset, all_triples_set, num_entities)
     test_neg = kg.get_corrupted_triples(test_eval_subset, all_triples_set, num_entities)
@@ -176,18 +219,25 @@ def run_single_seed_experiment(dataset_name, uncertainty_level, seed, args, devi
             ),
         },
     }
+    # Include validation/test counts and vocabulary coverage in the same audit.
+    for name, full, selected in (
+        ("Validation", kg.val_triples, val_eval_subset),
+        ("Test", kg.test_triples, test_eval_subset),
+    ):
+        for key, value in compute_training_coverage(full, selected).items():
+            experiment_statistics["Training Coverage"][f"{name} {key}"] = value
     
-    # Models to compare
-    models = {
-        "Standard TransE": TransE(
+    # Instantiate only the requested models. This keeps focused reruns efficient.
+    model_factories = {
+        "standard": lambda: TransE(
             num_entities=num_entities,
             num_relations=num_relations,
             embedding_dim=args.embedding_dim,
             margin=args.margin,
             p_norm=args.p_norm
         ).to(device),
-        
-        "RFM-TransE (Sigmoid)": RFMTransE(
+
+        "sigmoid": lambda: RFMTransE(
             num_entities=num_entities,
             num_relations=num_relations,
             embedding_dim=args.embedding_dim,
@@ -199,7 +249,7 @@ def run_single_seed_experiment(dataset_name, uncertainty_level, seed, args, devi
             membership_function="sigmoid"
         ).to(device),
 
-        "RFM-TransE (Exponential)": RFMTransE(
+        "exponential": lambda: RFMTransE(
             num_entities=num_entities,
             num_relations=num_relations,
             embedding_dim=args.embedding_dim,
@@ -211,7 +261,7 @@ def run_single_seed_experiment(dataset_name, uncertainty_level, seed, args, devi
             membership_function="exponential"
         ).to(device),
 
-        "RFM-TransE (Gaussian)": RFMTransE(
+        "gaussian": lambda: RFMTransE(
             num_entities=num_entities,
             num_relations=num_relations,
             embedding_dim=args.embedding_dim,
@@ -223,21 +273,35 @@ def run_single_seed_experiment(dataset_name, uncertainty_level, seed, args, devi
             membership_function="gaussian"
         ).to(device)
     }
+    display_names = {
+        "standard": "Standard TransE",
+        "sigmoid": "RFM-TransE (Sigmoid)",
+        "exponential": "RFM-TransE (Exponential)",
+        "gaussian": "RFM-TransE (Gaussian)",
+    }
+    requested_models = getattr(
+        args, "models", ["standard", "sigmoid", "exponential", "gaussian"]
+    )
+    models = {
+        display_names[name]: model_factories[name]() for name in requested_models
+    }
     
     seed_results = {}
     
     for model_name, model in models.items():
         set_seed(seed)
+        # Each model starts from the same order; never shuffle kg.train_triples.
+        model_train_triples = list(train_triples)
         optimizer = optim.Adam(model.parameters(), lr=args.lr)
         
         model.train()
         start_time = time.time()
         
         for epoch in range(1, args.epochs + 1):
-            random.shuffle(train_triples)
+            random.shuffle(model_train_triples)
             
-            for i in range(0, len(train_triples), args.batch_size):
-                batch_pos = train_triples[i : i + args.batch_size]
+            for i in range(0, len(model_train_triples), args.batch_size):
+                batch_pos = model_train_triples[i : i + args.batch_size]
                 if len(batch_pos) == 0:
                     continue
                     
@@ -258,12 +322,15 @@ def run_single_seed_experiment(dataset_name, uncertainty_level, seed, args, devi
                     pos_h, pos_r, pos_t, neg_h, neg_r, neg_t, 
                     pos_labels, neg_labels, optimizer
                 )
+            if epoch == 1 or epoch % 5 == 0 or epoch == args.epochs:
+                print(f"{model_name}: epoch {epoch}/{args.epochs} complete", flush=True)
                 
         training_time = time.time() - start_time
         
         model.eval()
         lp = evaluate_link_prediction(
-            model, test_eval_subset, all_triples_set, num_entities, device, batch_size=128
+            model, test_eval_subset, all_triples_set, num_entities, device,
+            batch_size=args.eval_batch_size
         )
         val_thresholds = optimize_thresholds(
             model, val_eval_subset, val_neg, num_relations, device
@@ -399,7 +466,7 @@ def main():
     parser.add_argument("--seeds", type=int, nargs="+", default=[42, 100, 2024],
                         help="List of random seeds to run multi-seed evaluation.")
     parser.add_argument("--epochs", type=int, default=30, help="Number of epochs to train.")
-    parser.add_argument("--batch_size", type=int, default=1024, help="Batch size for training.")
+    parser.add_argument("--batch_size", type=positive_integer, default=1024, help="Batch size for training.")
     parser.add_argument("--lr", type=float, default=0.005, help="Learning rate.")
     parser.add_argument("--embedding_dim", type=int, default=50, help="Embedding dimension size.")
     parser.add_argument("--margin", type=float, default=2.0, help="TransE ranking loss margin.")
@@ -409,11 +476,29 @@ def main():
     parser.add_argument("--fuzzy_bias", type=float, default=0.0, help="Bias for sigmoid membership function.")
     parser.add_argument("--uncertainty", type=str, default="medium", choices=["low", "medium", "high", "all"],
                         help="Uncertainty level or 'all' to run on low, medium, and high.")
-    parser.add_argument("--train_sample_size", type=int, default=10000, 
-                        help="Subsample training triples for speed. Set <= 0 to use full train set.")
-    parser.add_argument("--eval_sample_size", type=int, default=500, 
-                        help="Subsample validation/test triples for fast evaluation.")
-    parser.add_argument("--output_file", type=str, default="benchmark_results.md", 
+    parser.add_argument(
+        "--models", nargs="+",
+        choices=["standard", "sigmoid", "exponential", "gaussian"],
+        default=["standard", "sigmoid", "exponential", "gaussian"],
+        help="Models to run. Use '--models standard sigmoid' for the final thesis comparison."
+    )
+    parser.add_argument("--train_fraction", type=split_fraction, default=1.0,
+                        help="Fraction of the official training split to use (default: all).")
+    parser.add_argument("--val_fraction", type=split_fraction, default=1.0,
+                        help="Fraction of the official validation split to use (default: all).")
+    parser.add_argument("--test_fraction", type=split_fraction, default=1.0,
+                        help="Fraction of the official test split to use (default: all).")
+    parser.add_argument("--train_sample_size", type=int, default=0,
+                        help="Optional training cap after fraction selection. <= 0 means no cap.")
+    parser.add_argument("--eval_sample_size", type=int, default=0,
+                        help="Optional shared validation/test cap. <= 0 means no cap.")
+    parser.add_argument("--val_sample_size", type=int, default=None,
+                        help="Override the shared evaluation cap for validation only.")
+    parser.add_argument("--test_sample_size", type=int, default=None,
+                        help="Override the shared evaluation cap for test only.")
+    parser.add_argument("--eval_batch_size", type=positive_integer, default=16,
+                        help="Ranking query batch size; lower it to reduce memory, not coverage.")
+    parser.add_argument("--output_file", type=str, default="benchmark_results_full.md",
                         help="Path to save the benchmark results markdown report.")
     
     args = parser.parse_args()
@@ -460,11 +545,18 @@ def main():
         report += f"Evaluated Seeds: {args.seeds} (Mean ± Standard Deviation)\n"
         report += f"Hyperparameters: epochs={args.epochs}, lr={args.lr}, dim={args.embedding_dim}, "
         report += f"margin={args.margin}, lambda_fuzzy={args.lambda_fuzzy}\n\n"
+        report += f"Models: {args.models}.\n"
+        report += "Protocol: original train/validation/test files are preserved; no resplitting.\n"
+        report += f"Fractions (train/validation/test): {args.train_fraction}/{args.val_fraction}/{args.test_fraction}.\n"
+        report += f"Caps: train={args.train_sample_size}, shared evaluation={args.eval_sample_size}, "
+        report += f"validation override={args.val_sample_size}, test override={args.test_sample_size}. "
+        report += "Nonpositive caps mean unlimited; fractions apply first.\n"
+        report += f"Ranking query batch size: {args.eval_batch_size}.\n\n"
 
         report += "The standard TransE continuous reference uses the fixed post-hoc mapping "
         report += "$\\sigma(-0.1d)$, matching the thesis evaluation.\n\n"
 
-        report += "## Training Subsample Coverage\n\n"
+        report += "## Training Coverage\n\n"
         report += "Coverage is measured against the complete training split before sampling. Entity and "
         report += "relation coverage show whether a small triple sample still represents the vocabulary of "
         report += "the original training graph. Sampled counts and percentages are reported as mean $\\pm$ "
@@ -482,6 +574,21 @@ def main():
             report += f"{coverage['Full Train Relations_mean']:.0f} | "
             report += f"{coverage['Sampled Train Relations_mean']:.1f} ± {coverage['Sampled Train Relations_std']:.1f} | "
             report += f"{coverage['Relation Coverage (%)_mean']:.2f}% ± {coverage['Relation Coverage (%)_std']:.2f}% |\n"
+
+        report += "\n## Validation and Test Coverage\n\n"
+        report += "Coverage is relative to each original split, not to the training graph. "
+        report += "Full split use does not guarantee that every validation/test entity appears in training.\n\n"
+        report += "| Dataset | Split | Full Triples | Used Triples | Triple Coverage | Entity Coverage | Relation Coverage |\n"
+        report += "| :--- | :--- | ---: | ---: | ---: | ---: | ---: |\n"
+        for coverage in all_coverage_statistics:
+            for name in ("Validation", "Test"):
+                report += f"| {coverage['Dataset']} | {name} | "
+                report += f"{coverage[f'{name} Full Train Triples_mean']:.0f} | "
+                report += f"{coverage[f'{name} Sampled Train Triples_mean']:.1f} ± {coverage[f'{name} Sampled Train Triples_std']:.1f} | "
+                for metric in ("Triple", "Entity", "Relation"):
+                    key = f"{name} {metric} Coverage (%)"
+                    report += f"{coverage[key + '_mean']:.2f}% ± {coverage[key + '_std']:.2f}% | "
+                report += "\n"
 
         report += "\n## Soft Target Distribution Audit\n\n"
         report += "The table audits the fixed positive training targets and the fixed validation and test "
